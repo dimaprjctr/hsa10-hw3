@@ -1,0 +1,108 @@
+version: '3.6'
+services:
+  telegraf:
+    image: telegraf:1.28
+    container_name: telegraf
+    entrypoint: /bin/bash -c "chmod 666 /var/run/docker.sock && /entrypoint.sh telegraf"
+    platform: linux/amd64
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./telegraf/etc/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      - influxdb
+    links:
+      - influxdb
+    ports:
+      - '127.0.0.1:8125:8125/udp'
+    networks:
+      - backend
+
+  influxdb:
+    image: influxdb:1.8-alpine
+    container_name: influxdb
+    platform: linux/amd64
+    env_file: configuration.env
+    ports:
+      - '127.0.0.1:8086:8086'
+    volumes:
+      - ./:/imports
+      - influxdb_data:/var/lib/influxdb
+    networks:
+      - backend
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    restart: always
+    depends_on:
+      - influxdb
+    env_file: configuration.env
+    links:
+      - influxdb
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+      - ./grafana/dashboards/:/var/lib/grafana/dashboards/
+    networks:
+      - backend
+
+  mongodb:
+    image: mongo:7.0.2
+    container_name: mongodb
+    restart: always
+    ports:
+      - '27017:27017'
+    volumes:
+      - monogo_data:/var/lib/mongodb
+    networks:
+      - backend
+
+  elasticsearch:
+    image: elasticsearch:8.10.2
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - '9200:9200'
+    volumes:
+      - elastic_data:/var/lib/elastic
+    networks:
+      - backend
+
+  golang-test-app:
+    container_name: golang-test-app
+    restart: always
+    build:
+      context: ./golang-test-app
+    depends_on:
+      - mongodb
+      - elasticsearch
+    ports:
+      - "8080:8080"
+    networks:
+      - backend
+
+  nginx:
+    container_name: nginx
+    restart: always
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "3000:3000"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - golang-test-app
+      - grafana
+    networks:
+      - backend
+
+volumes:
+  grafana_data: {}
+  influxdb_data: {}
+  monogo_data: {}
+  elastic_data: {}
+
+networks:
+  backend:
